@@ -1,39 +1,68 @@
-name: Aida 每日自动续期
+name: Aida Auto Renew
 
 on:
   schedule:
-    # 每天 UTC 时间 00:30 执行（对应北京时间早上 08:30）
-    - cron: '30 0 * * *'
-  workflow_dispatch: # 支持在网页上手动点击触发测试！
+    # 每天 UTC 时间 00:00 (对应北京时间早晨 08:00) 自动运行
+    - cron: '0 0 * * *'
+  workflow_dispatch: # 允许在 Actions 页面点击按钮手动触发测试
 
 jobs:
-  renew:
+  Renew-Aida:
     runs-on: ubuntu-latest
+    permissions:
+      actions: write  
+      contents: read
     
     steps:
-      - name: 1. 检出仓库代码
-        uses: actions/checkout@v4
+    # 1. 检出当前公库的代码 (把根目录的 aida_renew.py 拉进运行环境)
+    - uses: actions/checkout@v4
 
-      - name: 2. 设置 Python 环境
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-          cache: 'pip' # 开启缓存，加速后续每天的执行速度
+    # 2. 部署 Python 3.12 环境
+    - name: ⚙ 设置 Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
 
-      - name: 3. 安装依赖与浏览器驱动
-        run: |
-          pip install seleniumbase
-          # 安装 Chromium 浏览器以及配套的 WebDriver
-          sudo apt-get update && sudo apt-get install -y chromium-browser
-          seleniumbase install chromedriver
+    # 3. 安装 Linux 虚拟桌面组件与浏览器驱动
+    - name: 🛠️ 安装系统依赖和 Python 依赖
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y xvfb x11-utils xdotool scrot fonts-noto-cjk
+        pip install seleniumbase requests
+        seleniumbase install chromedriver
 
-      - name: 4. 执行自动续期脚本 (自带虚拟屏幕)
-        env:
-          # 把 Secrets 注入为系统环境变量供 Python 读取
-          EMAIL: ${{ secrets.EMAIL }}
-          PASSWORD: ${{ secrets.PASSWORD }}
-          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-        run: |
-          # GitHub Actions 官方推荐用 xvfb-run 启动自动化脚本
-          xvfb-run --auto-servernum python3 aida_renew.py
+    # 4. [可选] 配置 sing-box 代理 (如果您不需要用代理进行续期，可以把这一整块 step 删掉)
+    - name: ⚙ 设置代理 (sing-box)
+      continue-on-error: true
+      env:
+        NODE_LINK: ${{ secrets.NODE_LINK }}
+      run: |
+        bash <(wget -qO- https://main.ssss.nyc.mn/setup_proxy.sh)
+
+    # 5. 核心：启动 1080P 虚拟屏幕并运行续期脚本
+    - name: 🚀 运行 Aida 续期脚本
+      env:
+        # ⚠️ 已经严格与您截图里填写的名称保持 100% 一致！
+        EMAIL: ${{ secrets.EMAIL }}
+        PASSWORD: ${{ secrets.PASSWORD }}
+        TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+        TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+      run: |
+        xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" \
+          python3 aida_renew.py
+        
+    # 6. 自动保持公库干净：只保留最新 1 次的运行日志
+    - name: 🧹 清理旧的工作流运行记录
+      if: always()
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        runs=$(gh run list --workflow="${{ github.workflow }}" --limit=100 --json databaseId --jq '.[].databaseId')
+        count=0
+        for run_id in $runs; do
+          count=$((count + 1))
+          if [ $count -gt 1 ]; then
+            echo "删除运行记录: $run_id"
+            gh run delete $run_id || true
+          fi
+        done
