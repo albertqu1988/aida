@@ -1,0 +1,39 @@
+name: Aida 每日自动续期
+
+on:
+  schedule:
+    # 每天 UTC 时间 00:30 执行（对应北京时间早上 08:30）
+    - cron: '30 0 * * *'
+  workflow_dispatch: # 支持在网页上手动点击触发测试！
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 1. 检出仓库代码
+        uses: actions/checkout@v4
+
+      - name: 2. 设置 Python 环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip' # 开启缓存，加速后续每天的执行速度
+
+      - name: 3. 安装依赖与浏览器驱动
+        run: |
+          pip install seleniumbase
+          # 安装 Chromium 浏览器以及配套的 WebDriver
+          sudo apt-get update && sudo apt-get install -y chromium-browser
+          seleniumbase install chromedriver
+
+      - name: 4. 执行自动续期脚本 (自带虚拟屏幕)
+        env:
+          # 把 Secrets 注入为系统环境变量供 Python 读取
+          EMAIL: ${{ secrets.EMAIL }}
+          PASSWORD: ${{ secrets.PASSWORD }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: |
+          # GitHub Actions 官方推荐用 xvfb-run 启动自动化脚本
+          xvfb-run --auto-servernum python3 aida_renew.py
